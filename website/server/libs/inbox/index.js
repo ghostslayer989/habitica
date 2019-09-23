@@ -74,7 +74,41 @@ export async function getUserInbox (user, options = {asArray: true, page: 0, con
   }
 }
 
+async function usersMapByConversations (owner, users) {
+  let query = Inbox
+    .aggregate([
+      {
+        $match: {
+          ownerId: owner._id,
+          uuid: { $in: users },
+        },
+      },
+      {
+        $group: {
+          _id: '$uuid',
+          user: {$last: '$user' },
+          username: {$last: '$username' },
+          userStyles: {$last: '$userStyles'},
+          contributor: {$last: '$contributor'},
+
+          count: {$sum: 1},
+        },
+      },
+    ]);
+
+
+  const usersAr = await query.exec();
+  const usersMap = {};
+
+  for (const usr of usersAr) {
+    usersMap[usr._id] = usr;
+  }
+
+  return usersMap;
+}
+
 export async function listConversations (owner) {
+  // group messages by user owned by logged-in user
   let query = Inbox
     .aggregate([
       {
@@ -89,8 +123,6 @@ export async function listConversations (owner) {
           username: {$last: '$username' },
           timestamp: {$last: '$timestamp'},
           text: {$last: '$text'},
-          userStyles: {$last: '$userStyles'},
-          contributor: {$last: '$contributor'},
           count: {$sum: 1},
         },
       },
@@ -99,9 +131,16 @@ export async function listConversations (owner) {
 
   const conversationsList = await query.exec();
 
+  const userIdList = conversationsList.map(c => c._id);
+
+  // get user-info based on conversations
+  const usersMap = await usersMapByConversations(owner, userIdList);
+
   const conversations = conversationsList.map((res) => ({
     uuid: res._id,
     ...res,
+    userStyles: usersMap[res._id].userStyles,
+    contributor: usersMap[res._id].contributor,
   }));
 
   return conversations;
